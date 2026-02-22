@@ -32,11 +32,12 @@ if [ ! -f "$DATA_FILE" ] || [ ! -s "$DATA_FILE" ]; then
 fi
 
 # Run speedtest
-logger -t "$LOG_TAG" "Starting speedtest..."
-raw=$($SPEEDTEST --json 2>/dev/null)
+logger -t "$LOG_TAG" "Starting speedtest using $SPEEDTEST..."
+raw=$($SPEEDTEST --json --secure 2>&1)
+rc=$?
 
-if [ $? -ne 0 ] || [ -z "$raw" ]; then
-    logger -t "$LOG_TAG" "ERROR: speedtest-cli failed"
+if [ $rc -ne 0 ] || [ -z "$raw" ] || ! echo "$raw" | jq . >/dev/null 2>&1; then
+    logger -t "$LOG_TAG" "ERROR: speedtest-cli failed (rc=$rc): $(echo "$raw" | head -1)"
     exit 1
 fi
 
