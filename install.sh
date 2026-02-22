@@ -8,10 +8,11 @@ CRON_SCHEDULE="0 * * * *"
 
 echo "=== Speed Monitor Setup ==="
 
-# 1. Install speedtest-cli
-if ! command -v speedtest-cli &>/dev/null; then
-    echo "[1/4] Installing speedtest-cli..."
-    pip3 install speedtest-cli
+# 1. Install speedtest-cli (in venv, no sudo needed)
+if [ ! -x "$SCRIPT_DIR/.venv/bin/speedtest-cli" ]; then
+    echo "[1/4] Installing speedtest-cli in venv..."
+    python3 -m venv "$SCRIPT_DIR/.venv"
+    "$SCRIPT_DIR/.venv/bin/pip" install speedtest-cli
 else
     echo "[1/4] speedtest-cli already installed"
 fi
@@ -19,21 +20,22 @@ fi
 # Verify jq is available
 if ! command -v jq &>/dev/null; then
     echo "[!] jq is required. Installing..."
-    sudo apt-get install -y jq
+    apt-get install -y jq
 fi
 
 # 2. Make scripts executable
 echo "[2/4] Setting permissions..."
 chmod +x "$SCRIPT_DIR/speedtest.sh"
 
-# 3. Symlink to web root
+# 3. Copy to web root (nginx can't follow symlinks to home dirs)
 echo "[3/4] Deploying to $WEB_ROOT..."
-sudo ln -sf "$SCRIPT_DIR/index.html" "$WEB_ROOT/speedtest.html"
+cp "$SCRIPT_DIR/index.html" "$WEB_ROOT/speedtest.html"
+chmod 644 "$WEB_ROOT/speedtest.html"
 
 # Initialize data file if needed
 if [ ! -f "$WEB_ROOT/speedtest-data.json" ]; then
-    echo '{"results":[],"updated":""}' | sudo tee "$WEB_ROOT/speedtest-data.json" > /dev/null
-    sudo chmod 644 "$WEB_ROOT/speedtest-data.json"
+    echo '{"results":[],"updated":""}' | tee "$WEB_ROOT/speedtest-data.json" > /dev/null
+    chmod 644 "$WEB_ROOT/speedtest-data.json"
 fi
 
 # 4. Setup cron job

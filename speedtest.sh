@@ -2,10 +2,17 @@
 # speedtest.sh - Run speedtest and append result to JSON data file
 # Called by cron every hour
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DATA_FILE="/var/www/html/speedtest-data.json"
 LOCK_FILE="/tmp/speedtest-monitor.lock"
 MAX_AGE_DAYS=30
 LOG_TAG="speedtest-monitor"
+SPEEDTEST="$SCRIPT_DIR/.venv/bin/speedtest-cli"
+
+# Fallback to system speedtest-cli if venv doesn't exist
+if [ ! -x "$SPEEDTEST" ]; then
+    SPEEDTEST="speedtest-cli"
+fi
 
 # Prevent concurrent runs
 if [ -f "$LOCK_FILE" ]; then
@@ -26,7 +33,7 @@ fi
 
 # Run speedtest
 logger -t "$LOG_TAG" "Starting speedtest..."
-raw=$(speedtest-cli --json 2>/dev/null)
+raw=$($SPEEDTEST --json 2>/dev/null)
 
 if [ $? -ne 0 ] || [ -z "$raw" ]; then
     logger -t "$LOG_TAG" "ERROR: speedtest-cli failed"
@@ -60,11 +67,12 @@ new_entry=$(jq -n \
 cutoff=$(date -d "-${MAX_AGE_DAYS} days" -Iseconds 2>/dev/null || date -v-${MAX_AGE_DAYS}d -Iseconds 2>/dev/null)
 
 # Append to data file and rotate old entries
+updated=$(date -Iseconds)
 tmp=$(mktemp)
-jq --argjson entry "$new_entry" --arg cutoff "$cutoff" '
+jq --argjson entry "$new_entry" --arg cutoff "$cutoff" --arg updated "$updated" '
     .results += [$entry] |
     .results |= map(select(.timestamp > $cutoff)) |
-    .updated = now | todate
+    .updated = $updated
 ' "$DATA_FILE" > "$tmp" && mv "$tmp" "$DATA_FILE"
 
 chmod 644 "$DATA_FILE"
