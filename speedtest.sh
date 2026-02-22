@@ -31,15 +31,25 @@ if [ ! -f "$DATA_FILE" ] || [ ! -s "$DATA_FILE" ]; then
     echo '{"results":[],"updated":""}' > "$DATA_FILE"
 fi
 
-# Run speedtest
-logger -t "$LOG_TAG" "Starting speedtest using $SPEEDTEST..."
-raw=$($SPEEDTEST --json --secure 2>&1)
-rc=$?
+# Run speedtest with retry
+MAX_RETRIES=3
+for attempt in $(seq 1 $MAX_RETRIES); do
+    logger -t "$LOG_TAG" "Starting speedtest (attempt $attempt/$MAX_RETRIES)..."
+    raw=$($SPEEDTEST --json --secure 2>&1)
+    rc=$?
 
-if [ $rc -ne 0 ] || [ -z "$raw" ] || ! echo "$raw" | jq . >/dev/null 2>&1; then
-    logger -t "$LOG_TAG" "ERROR: speedtest-cli failed (rc=$rc): $(echo "$raw" | head -1)"
-    exit 1
-fi
+    if [ $rc -eq 0 ] && [ -n "$raw" ] && echo "$raw" | jq . >/dev/null 2>&1; then
+        break
+    fi
+
+    if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+        logger -t "$LOG_TAG" "Attempt $attempt failed: $(echo "$raw" | head -1). Retrying in 30s..."
+        sleep 30
+    else
+        logger -t "$LOG_TAG" "ERROR: speedtest-cli failed after $MAX_RETRIES attempts (rc=$rc): $(echo "$raw" | head -1)"
+        exit 1
+    fi
+done
 
 # Parse results (speedtest-cli outputs bits/s, convert to Mbit/s)
 timestamp=$(echo "$raw" | jq -r '.timestamp')
