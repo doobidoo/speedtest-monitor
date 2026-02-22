@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speed Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        .stat-card { transition: transform 0.15s; }
+        .stat-card:hover { transform: translateY(-2px); }
+        .range-btn.active { background-color: #3b82f6; color: white; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <!-- Header -->
+    <header class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+        <div class="flex items-center justify-between max-w-7xl mx-auto">
+            <div class="flex items-center gap-4">
+                <h1 class="text-xl font-bold">Speed Monitor</h1>
+                <span class="text-gray-400 text-sm">Internet Performance</span>
+            </div>
+            <div class="flex items-center gap-4">
+                <span id="last-update" class="text-gray-400 text-sm">-</span>
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" id="auto-refresh" checked class="rounded">
+                    Auto-refresh
+                </label>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-6 space-y-6">
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div class="stat-card bg-gray-800 rounded-lg p-4">
+                <div class="text-2xl font-bold text-blue-400" id="stat-download">-</div>
+                <div class="text-gray-400 text-sm">Download (Mbit/s)</div>
+            </div>
+            <div class="stat-card bg-gray-800 rounded-lg p-4">
+                <div class="text-2xl font-bold text-green-400" id="stat-upload">-</div>
+                <div class="text-gray-400 text-sm">Upload (Mbit/s)</div>
+            </div>
+            <div class="stat-card bg-gray-800 rounded-lg p-4">
+                <div class="text-2xl font-bold text-yellow-400" id="stat-ping">-</div>
+                <div class="text-gray-400 text-sm">Ping (ms)</div>
+            </div>
+            <div class="stat-card bg-gray-800 rounded-lg p-4">
+                <div class="text-2xl font-bold text-blue-300" id="stat-avg-download">-</div>
+                <div class="text-gray-400 text-sm">Avg Download</div>
+            </div>
+            <div class="stat-card bg-gray-800 rounded-lg p-4">
+                <div class="text-2xl font-bold text-green-300" id="stat-avg-upload">-</div>
+                <div class="text-gray-400 text-sm">Avg Upload</div>
+            </div>
+            <div class="stat-card bg-gray-800 rounded-lg p-4">
+                <div class="text-2xl font-bold text-yellow-300" id="stat-avg-ping">-</div>
+                <div class="text-gray-400 text-sm">Avg Ping</div>
+            </div>
+        </div>
+
+        <!-- Time Range Filter -->
+        <div class="flex gap-2">
+            <button class="range-btn px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm" data-range="24h">24h</button>
+            <button class="range-btn active px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm" data-range="7d">7 Tage</button>
+            <button class="range-btn px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm" data-range="30d">30 Tage</button>
+        </div>
+
+        <!-- Download/Upload Chart -->
+        <div class="bg-gray-800 rounded-lg p-4">
+            <h2 class="font-semibold mb-4">Download / Upload</h2>
+            <div style="height: 300px;">
+                <canvas id="speed-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Ping Chart -->
+        <div class="bg-gray-800 rounded-lg p-4">
+            <h2 class="font-semibold mb-4">Ping</h2>
+            <div style="height: 200px;">
+                <canvas id="ping-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Measurements Table -->
+        <div class="bg-gray-800 rounded-lg">
+            <div class="border-b border-gray-700 px-4 py-3 flex items-center justify-between">
+                <h2 class="font-semibold">Letzte Messungen</h2>
+                <button onclick="fetchData()" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                    Refresh
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-gray-400 border-b border-gray-700">
+                            <th class="text-left px-4 py-3">Zeit</th>
+                            <th class="text-right px-4 py-3">Download</th>
+                            <th class="text-right px-4 py-3">Upload</th>
+                            <th class="text-right px-4 py-3">Ping</th>
+                            <th class="text-left px-4 py-3 hidden md:table-cell">Server</th>
+                        </tr>
+                    </thead>
+                    <tbody id="measurements-table">
+                        <tr><td colspan="5" class="text-center text-gray-500 py-8">Lade Daten...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="text-gray-500 text-sm">
+            Daten werden stündlich aktualisiert. Dashboard refresht alle 60 Sekunden.
+        </div>
+    </main>
+
+    <script>
+        let allResults = [];
+        let currentRange = '7d';
+        let speedChart = null;
+        let pingChart = null;
+
+        const chartDefaults = {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { intersect: false, mode: 'index' },
+            plugins: {
+                legend: { labels: { color: '#9ca3af' } },
+                tooltip: {
+                    backgroundColor: '#1f2937',
+                    borderColor: '#374151',
+                    borderWidth: 1
+                }
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: { tooltipFormat: 'dd.MM.yyyy HH:mm' },
+                    ticks: { color: '#6b7280' },
+                    grid: { color: '#1f2937' }
+                },
+                y: {
+                    ticks: { color: '#6b7280' },
+                    grid: { color: '#1f2937' }
+                }
+            }
+        };
+
+        // Filter results by time range
+        function filterByRange(results, range) {
+            const now = new Date();
+            let cutoff;
+            switch (range) {
+                case '24h': cutoff = new Date(now - 24 * 60 * 60 * 1000); break;
+                case '7d':  cutoff = new Date(now - 7 * 24 * 60 * 60 * 1000); break;
+                case '30d': cutoff = new Date(now - 30 * 24 * 60 * 60 * 1000); break;
+            }
+            return results.filter(r => new Date(r.timestamp) >= cutoff);
+        }
+
+        // Update stats cards
+        function updateStats(results) {
+            if (results.length === 0) {
+                ['stat-download','stat-upload','stat-ping','stat-avg-download','stat-avg-upload','stat-avg-ping']
+                    .forEach(id => document.getElementById(id).textContent = '-');
+                return;
+            }
+
+            const latest = results[results.length - 1];
+            document.getElementById('stat-download').textContent = latest.download_mbps.toFixed(1);
+            document.getElementById('stat-upload').textContent = latest.upload_mbps.toFixed(1);
+            document.getElementById('stat-ping').textContent = latest.ping_ms.toFixed(1);
+
+            const avg = (arr, key) => (arr.reduce((s, r) => s + r[key], 0) / arr.length).toFixed(1);
+            document.getElementById('stat-avg-download').textContent = avg(results, 'download_mbps');
+            document.getElementById('stat-avg-upload').textContent = avg(results, 'upload_mbps');
+            document.getElementById('stat-avg-ping').textContent = avg(results, 'ping_ms');
+        }
+
+        // Update charts
+        function updateCharts(results) {
+            const labels = results.map(r => new Date(r.timestamp));
+            const dlData = results.map(r => r.download_mbps);
+            const ulData = results.map(r => r.upload_mbps);
+            const pingData = results.map(r => r.ping_ms);
+
+            // Speed chart
+            if (speedChart) {
+                speedChart.data.labels = labels;
+                speedChart.data.datasets[0].data = dlData;
+                speedChart.data.datasets[1].data = ulData;
+                speedChart.update('none');
+            } else {
+                speedChart = new Chart(document.getElementById('speed-chart'), {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [
+                            {
+                                label: 'Download (Mbit/s)',
+                                data: dlData,
+                                borderColor: '#3b82f6',
+                                backgroundColor: 'rgba(59,130,246,0.1)',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 3,
+                                pointHoverRadius: 6
+                            },
+                            {
+                                label: 'Upload (Mbit/s)',
+                                data: ulData,
+                                borderColor: '#10b981',
+                                backgroundColor: 'rgba(16,185,129,0.1)',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 3,
+                                pointHoverRadius: 6
+                            }
+                        ]
+                    },
+                    options: {
+                        ...chartDefaults,
+                        scales: {
+                            ...chartDefaults.scales,
+                            y: { ...chartDefaults.scales.y, title: { display: true, text: 'Mbit/s', color: '#6b7280' } }
+                        }
+                    }
+                });
+            }
+
+            // Ping chart
+            if (pingChart) {
+                pingChart.data.labels = labels;
+                pingChart.data.datasets[0].data = pingData;
+                pingChart.update('none');
+            } else {
+                pingChart = new Chart(document.getElementById('ping-chart'), {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [{
+                            label: 'Ping (ms)',
+                            data: pingData,
+                            borderColor: '#eab308',
+                            backgroundColor: 'rgba(234,179,8,0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 3,
+                            pointHoverRadius: 6
+                        }]
+                    },
+                    options: {
+                        ...chartDefaults,
+                        scales: {
+                            ...chartDefaults.scales,
+                            y: { ...chartDefaults.scales.y, title: { display: true, text: 'ms', color: '#6b7280' } }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Update table
+        function updateTable(results) {
+            const tbody = document.getElementById('measurements-table');
+            if (results.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-500 py-8">Keine Daten vorhanden</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = results.slice().reverse().slice(0, 50).map(r => {
+                const t = new Date(r.timestamp);
+                const timeStr = t.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) +
+                    ' ' + t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+                return `
+                    <tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
+                        <td class="px-4 py-2 text-gray-300">${timeStr}</td>
+                        <td class="px-4 py-2 text-right text-blue-400 font-mono">${r.download_mbps.toFixed(1)}</td>
+                        <td class="px-4 py-2 text-right text-green-400 font-mono">${r.upload_mbps.toFixed(1)}</td>
+                        <td class="px-4 py-2 text-right text-yellow-400 font-mono">${r.ping_ms.toFixed(1)}</td>
+                        <td class="px-4 py-2 text-gray-400 hidden md:table-cell">${r.server || '-'}</td>
+                    </tr>`;
+            }).join('');
+        }
+
+        // Render everything for current range
+        function render() {
+            const filtered = filterByRange(allResults, currentRange);
+            updateStats(filtered);
+            updateCharts(filtered);
+            updateTable(filtered);
+        }
+
+        // Fetch data
+        async function fetchData() {
+            try {
+                const res = await fetch('/speedtest-data.json?' + Date.now());
+                const data = await res.json();
+                allResults = data.results || [];
+                render();
+                if (data.updated) {
+                    const d = new Date(data.updated);
+                    document.getElementById('last-update').textContent =
+                        'Aktualisiert: ' + d.toLocaleTimeString('de-DE');
+                }
+            } catch (err) {
+                console.error('Fehler beim Laden:', err);
+                document.getElementById('last-update').textContent = 'Fehler beim Laden';
+            }
+        }
+
+        // Range buttons
+        document.querySelectorAll('.range-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentRange = btn.dataset.range;
+                render();
+            });
+        });
+
+        // Auto-refresh
+        setInterval(() => {
+            if (document.getElementById('auto-refresh').checked) {
+                fetchData();
+            }
+        }, 60000);
+
+        // Init
+        fetchData();
+    </script>
+</body>
+</html>
