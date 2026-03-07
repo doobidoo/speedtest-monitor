@@ -58,6 +58,7 @@ upload_bps=$(echo "$raw" | jq -r '.upload')
 ping_ms=$(echo "$raw" | jq -r '.ping')
 server=$(echo "$raw" | jq -r '.server.sponsor + " (" + .server.name + ")"')
 isp=$(echo "$raw" | jq -r '.client.isp')
+public_ip=$(echo "$raw" | jq -r '.client.ip')
 
 # Convert bits/s to Mbit/s with 2 decimal places
 download_mbps=$(echo "$download_bps" | awk '{printf "%.2f", $1 / 1000000}')
@@ -72,7 +73,8 @@ new_entry=$(jq -n \
     --argjson ping "$ping_rounded" \
     --arg srv "$server" \
     --arg isp "$isp" \
-    '{timestamp: $ts, download_mbps: $dl, upload_mbps: $ul, ping_ms: $ping, server: $srv, isp: $isp}')
+    --arg ip "$public_ip" \
+    '{timestamp: $ts, download_mbps: $dl, upload_mbps: $ul, ping_ms: $ping, server: $srv, isp: $isp, public_ip: $ip}')
 
 # Calculate cutoff timestamp (30 days ago)
 cutoff=$(date -d "-${MAX_AGE_DAYS} days" -Iseconds 2>/dev/null || date -v-${MAX_AGE_DAYS}d -Iseconds 2>/dev/null)
@@ -88,4 +90,4 @@ jq --argjson entry "$new_entry" --arg cutoff "$cutoff" --arg updated "$updated" 
 
 chmod 644 "$DATA_FILE"
 
-logger -t "$LOG_TAG" "Done: ${download_mbps} Mbit/s down, ${upload_mbps} Mbit/s up, ${ping_rounded} ms ping"
+logger -t "$LOG_TAG" "Done: ${download_mbps} Mbit/s down, ${upload_mbps} Mbit/s up, ${ping_rounded} ms ping, IP: ${public_ip}"

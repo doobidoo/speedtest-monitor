@@ -35,6 +35,23 @@
     </header>
 
     <main class="max-w-7xl mx-auto p-6 space-y-6">
+        <!-- IP Address Card -->
+        <div id="ip-card" class="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-700">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-gray-400 text-sm mb-1">Public IP</div>
+                    <div class="flex items-center gap-3">
+                        <span id="current-ip" class="text-2xl font-mono font-bold text-cyan-400">-</span>
+                        <span id="ip-change-indicator" class="hidden text-sm px-2 py-1 bg-yellow-500/20 text-yellow-400 rounded">IP geändert!</span>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-gray-400 text-sm">IP-Änderungen</div>
+                    <div id="ip-change-count" class="text-xl font-bold text-orange-400">0</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Stats Cards -->
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <div class="stat-card bg-gray-800 rounded-lg p-4">
@@ -102,11 +119,12 @@
                             <th class="text-right px-4 py-3">Download</th>
                             <th class="text-right px-4 py-3">Upload</th>
                             <th class="text-right px-4 py-3">Ping</th>
-                            <th class="text-left px-4 py-3 hidden md:table-cell">Server</th>
+                            <th class="text-left px-4 py-3">IP</th>
+                            <th class="text-left px-4 py-3 hidden lg:table-cell">Server</th>
                         </tr>
                     </thead>
                     <tbody id="measurements-table">
-                        <tr><td colspan="5" class="text-center text-gray-500 py-8">Lade Daten...</td></tr>
+                        <tr><td colspan="6" class="text-center text-gray-500 py-8">Lade Daten...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -130,6 +148,8 @@
         let currentRange = '7d';
         let speedChart = null;
         let pingChart = null;
+        let lastKnownIP = null;
+        let ipChanges = [];
 
         const chartDefaults = {
             responsive: true,
@@ -167,6 +187,49 @@
                 case '30d': cutoff = new Date(now - 30 * 24 * 60 * 60 * 1000); break;
             }
             return results.filter(r => new Date(r.timestamp) >= cutoff);
+        }
+
+        // Detect IP changes
+        function detectIPChanges(results) {
+            ipChanges = [];
+            let previousIP = null;
+            
+            results.forEach((result, idx) => {
+                if (result.public_ip && previousIP && result.public_ip !== previousIP) {
+                    ipChanges.push({
+                        timestamp: result.timestamp,
+                        oldIP: previousIP,
+                        newIP: result.public_ip,
+                        index: idx
+                    });
+                }
+                if (result.public_ip) {
+                    previousIP = result.public_ip;
+                }
+            });
+            
+            // Update IP card
+            const currentIP = results.length > 0 && results[results.length - 1].public_ip ? 
+                results[results.length - 1].public_ip : '-';
+            
+            document.getElementById('current-ip').textContent = currentIP;
+            document.getElementById('ip-change-count').textContent = ipChanges.length;
+            
+            // Show indicator if IP changed recently (within last 24h)
+            const indicator = document.getElementById('ip-change-indicator');
+            const now = new Date();
+            const recentChange = ipChanges.find(change => 
+                (now - new Date(change.timestamp)) < 24 * 60 * 60 * 1000
+            );
+            
+            if (recentChange) {
+                indicator.classList.remove('hidden');
+                setTimeout(() => indicator.classList.add('animate-pulse'), 100);
+            } else {
+                indicator.classList.add('hidden');
+            }
+            
+            return ipChanges;
         }
 
         // Update stats cards
@@ -275,21 +338,40 @@
         function updateTable(results) {
             const tbody = document.getElementById('measurements-table');
             if (results.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-500 py-8">Keine Daten vorhanden</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-500 py-8">Keine Daten vorhanden</td></tr>';
                 return;
             }
 
-            tbody.innerHTML = results.slice().reverse().slice(0, 50).map(r => {
+            const reversedResults = results.slice().reverse().slice(0, 50);
+            let previousIP = null;
+            
+            tbody.innerHTML = reversedResults.map((r, idx) => {
                 const t = new Date(r.timestamp);
                 const timeStr = t.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) +
                     ' ' + t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+                
+                // Check if IP changed from previous entry
+                const ipChanged = previousIP && r.public_ip && r.public_ip !== previousIP;
+                const ipDisplay = r.public_ip || '-';
+                previousIP = r.public_ip;
+                
+                // Find if this entry is an IP change point
+                const isChangePoint = ipChanges.some(change => 
+                    change.timestamp === r.timestamp && change.newIP === r.public_ip
+                );
+                
                 return `
-                    <tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
+                    <tr class="border-b border-gray-700/50 hover:bg-gray-700/30 ${isChangePoint ? 'bg-yellow-500/10' : ''}">
                         <td class="px-4 py-2 text-gray-300">${timeStr}</td>
                         <td class="px-4 py-2 text-right text-blue-400 font-mono">${r.download_mbps.toFixed(1)}</td>
                         <td class="px-4 py-2 text-right text-green-400 font-mono">${r.upload_mbps.toFixed(1)}</td>
                         <td class="px-4 py-2 text-right text-yellow-400 font-mono">${r.ping_ms.toFixed(1)}</td>
-                        <td class="px-4 py-2 text-gray-400 hidden md:table-cell">${r.server || '-'}</td>
+                        <td class="px-4 py-2 font-mono ${
+                            isChangePoint ? 'text-yellow-400 font-bold' : 'text-cyan-400'
+                        }">
+                            ${isChangePoint ? '⚠ ' : ''}${ipDisplay}
+                        </td>
+                        <td class="px-4 py-2 text-gray-400 hidden lg:table-cell">${r.server || '-'}</td>
                     </tr>`;
             }).join('');
         }
@@ -297,6 +379,7 @@
         // Render everything for current range
         function render() {
             const filtered = filterByRange(allResults, currentRange);
+            detectIPChanges(filtered);
             updateStats(filtered);
             updateCharts(filtered);
             updateTable(filtered);
